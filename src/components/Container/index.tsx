@@ -1,0 +1,8 @@
+import { type ReactNode } from 'react'
+export function Container({children}: Readonly<{ children: ReactNode}>) {
+    return(
+        <div className="w-full max-w-7xl mx-auto px-4">
+            {children}
+        </div>
+    )
+}
