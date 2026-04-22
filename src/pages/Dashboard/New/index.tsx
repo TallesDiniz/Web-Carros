@@ -25,45 +25,51 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+interface CarImage {
+    previewUrl: string;
+    cloudinaryUrl: string;
+    uploading: boolean;
+}
+
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
 export function New() {
-    const {user} = useContext(AuthContext)
+    const { user } = useContext(AuthContext);
+    const [carImages, setCarImages] = useState<CarImage[]>([]);
 
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [cloudinaryUrl, setCloudinaryUrl] = useState<string | null>(null);
-    const [uploading, setUploading] = useState(false);
-
-     const { register, handleSubmit, formState: { errors }, reset } = useForm<FormData>({
+    const { register, handleSubmit, formState: { errors }, reset } = useForm<FormData>({
         resolver: zodResolver(schema),
         mode: "onChange"
-    })
+    });
 
+    async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+        if (!e.target.files || !e.target.files[0]) return;
 
-    
+        const image = e.target.files[0];
 
-    async function handleFile(e: ChangeEvent<HTMLInputElement>){
-        if(!e.target.files || !e.target.files[0]) return;
-            const image = e.target.files[0]
+        if (image.type !== "image/jpeg" && image.type !== "image/png") {
+            alert("Apenas arquivos JPEG ou PNG são permitidos.");
+            return;
+        }
 
-            if(image.type !== 'image/jpeg' && image.type !== 'image/png'){
-                alert("Apenas arquivos JPEG ou PNG são permitidos.");
-                return;
+        // Add preview immediately, then upload in background
+        const previewUrl = URL.createObjectURL(image);
+        const index = carImages.length;
+
+        setCarImages(prev => [...prev, { previewUrl, cloudinaryUrl: "", uploading: true }]);
+
+        const cloudinaryUrl = await handleUpload(image);
+
+        setCarImages(prev =>
+            prev.map((img, i) => i === index
+                ? { ...img, cloudinaryUrl, uploading: false }
+                : img
+            )
+        );
+
+        e.target.value = "";
     }
-
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(URL.createObjectURL(image));
-    setCloudinaryUrl(null);
-
-    setUploading(true);
-    const url = await handleUpload(image);
-    setCloudinaryUrl(url);
-    setUploading(false);
-
-    e.target.value = "";
-
-}
 
     async function handleUpload(image: File): Promise<string> {
         const formData = new FormData();
@@ -79,172 +85,129 @@ export function New() {
         return data.secure_url as string;
     }
 
-
-    function handleRemoveImg() {
-        if(previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(null)
-        setCloudinaryUrl(null);
+    function handleRemoveImage(index: number) {
+        setCarImages(prev => {
+            URL.revokeObjectURL(prev[index].previewUrl);
+            return prev.filter((_, i) => i !== index);
+        });
     }
 
     async function onSubmit(data: FormData) {
-        if (uploading) {
-            alert("Aguarde o upload da imagem ser concluído.");
+        if (carImages.some(img => img.uploading)) {
+            alert("Aguarde o upload de todas as imagens ser concluído.");
             return;
         }
 
+        if (carImages.length === 0) {
+            alert("Adicione pelo menos uma imagem do carro.");
+            return;
+        }
+
+        const imageUrls = carImages.map(img => img.cloudinaryUrl);
+
         await addDoc(collection(db, "cars"), {
             ...data,
-            imageUrl: cloudinaryUrl,
-            uid: user?.uid
-        })
+            created: new Date(), 
+            images: imageUrls,
+            uid: user?.uid,
+        });
 
-        reset()
-        handleRemoveImg()
+        // Free all blob URLs from memory
+        carImages.forEach(img => URL.revokeObjectURL(img.previewUrl));
+        setCarImages([]);
+        reset();
     }
 
-    
-
-   
     return (
         <Container>
             <DashboardHeader />
 
+            <div className="w-full bg-white p-3 rounded-lg flex flex-row flex-wrap items-center gap-3">
 
-            <div className="w-full bg-white p-3 rounded-lg flex items-center gap-2">
-                {previewUrl? (
-                    <div className="relative w-48 h-32 rounded-lg overflow-hidden border-2 border-gray-300">
-                        <img 
-                        src={previewUrl} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover"
+                {/* Previews */}
+                {carImages.map((img, index) => (
+                    <div key={index} className="relative w-32 h-32 rounded-lg overflow-hidden border-2 border-gray-300">
+                        <img
+                            src={img.previewUrl}
+                            alt={`Imagem ${index + 1}`}
+                            className="w-full h-full object-cover"
                         />
-                        {uploading && (
-                            <div className="absolute inset bg-black/50 flex items-center justify center">
-                                <span className="text-white text-sm">Enviando</span>
+                        {/* Upload spinner overlay */}
+                        {img.uploading && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                <span className="text-white text-xs">Enviando...</span>
                             </div>
                         )}
-                        {!uploading && (
-                            <button type="button" onClick={handleRemoveImg} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1">
+                        {/* Remove button */}
+                        {!img.uploading && (
+                            <button
+                                type="button"
+                                onClick={() => handleRemoveImage(index)}
+                                className="cursor-pointer absolute top-1 right-1 bg-red-500 text-white rounded-full p-1"
+                            >
                                 <FiTrash size={12} />
                             </button>
                         )}
                     </div>
-                
-                ): (
-                     <label className="border-2 w-48 h-32 rounded-lg flex items-center justify-center cursor-pointer border-gray-600 hover:bg-gray-50">
-                        <FiUpload size={30} color="#000" />
-                        <input
-                            type="file"
-                            accept="image/jpeg, image/png"
-                            className="hidden"
-                            onChange={handleFile}
-                        />
-                    </label>
-                )}
+                ))}
+
+                {/* Upload button — always visible so user can keep adding */}
+                <label className="border-2 w-32 h-32 rounded-lg flex flex-col items-center justify-center cursor-pointer border-gray-600 hover:bg-gray-50 gap-2">
+                    <FiUpload size={30} color="#000" />
+                    <span className="text-xs text-gray-600">Adicionar foto</span>
+                    <input
+                        type="file"
+                        accept="image/jpeg, image/png"
+                        className="hidden"
+                        onChange={handleFile}
+                    />
+                </label>
+
             </div>
-           
-        
-            <div className="w-full flex flex-col bg-white p-3 rounded-lg sm:flex-row items-center gap-2 mt-2 ">
+
+            <div className="w-full flex flex-col bg-white p-3 rounded-lg sm:flex-row items-center gap-2 mt-2">
                 <form className="w-full" onSubmit={handleSubmit(onSubmit)}>
                     <div className="mb-3">
-                        <p className="mb-2 font-medium">
-                            Nome do carro
-                        </p>
-                        <Input
-                            type="text"
-                            register={register}
-                            name="name"
-                            error={errors.name?.message}
-                            placeholder="Ex: Onix 1.0..."
-                        />
+                        <p className="mb-2 font-medium">Nome do carro</p>
+                        <Input type="text" register={register} name="name" error={errors.name?.message} placeholder="Ex: Onix 1.0..." />
                     </div>
 
                     <div className="mb-3">
-                        <p className="mb-2 font-medium">
-                            Modelo do carro
-                        </p>
-                        <Input
-                            type="text"
-                            register={register}
-                            name="model"
-                            error={errors.model?.message}
-                            placeholder="Ex: 1.0 flex plus manual..."
-                        />
+                        <p className="mb-2 font-medium">Modelo do carro</p>
+                        <Input type="text" register={register} name="model" error={errors.model?.message} placeholder="Ex: 1.0 flex plus manual..." />
                     </div>
 
                     <div className="flex w-full mb-3 flex-row items-center gap-4">
                         <div className="w-full">
-                            <p className="mb-2 font-medium">
-                                Ano
-                            </p>
-                            <Input
-                                type="text"
-                                register={register}
-                                name="year"
-                                error={errors.year?.message}
-                                placeholder="Ex: 2020/2020"
-                            />
+                            <p className="mb-2 font-medium">Ano</p>
+                            <Input type="text" register={register} name="year" error={errors.year?.message} placeholder="Ex: 2020/2020" />
                         </div>
                         <div className="w-full">
-                            <p className="mb-2 font-medium">
-                                KM rodados
-                            </p>
-                            <Input
-                                type="text"
-                                register={register}
-                                name="km"
-                                error={errors.km?.message}
-                                placeholder="Ex: 23.900..."
-                            />
+                            <p className="mb-2 font-medium">KM rodados</p>
+                            <Input type="text" register={register} name="km" error={errors.km?.message} placeholder="Ex: 23.900..." />
                         </div>
                     </div>
 
-                     <div className="flex w-full mb-3 flex-row items-center gap-4">
+                    <div className="flex w-full mb-3 flex-row items-center gap-4">
                         <div className="w-full">
-                            <p className="mb-2 font-medium">
-                                Telefone / Whatsapp
-                            </p>
-                            <Input
-                                type="text"
-                                register={register}
-                                name="whatsapp"
-                                error={errors.whatsapp?.message}
-                                placeholder="Ex: 11999043376"
-                            />
+                            <p className="mb-2 font-medium">Telefone / Whatsapp</p>
+                            <Input type="text" register={register} name="whatsapp" error={errors.whatsapp?.message} placeholder="Ex: 11999043376" />
                         </div>
                         <div className="w-full">
-                            <p className="mb-2 font-medium">
-                                Cidade
-                            </p>
-                            <Input
-                                type="text"
-                                register={register}
-                                name="city"
-                                error={errors.city?.message}
-                                placeholder="Ex: São Paulo - SP..."
-                            />
+                            <p className="mb-2 font-medium">Cidade</p>
+                            <Input type="text" register={register} name="city" error={errors.city?.message} placeholder="Ex: São Paulo - SP..." />
                         </div>
                     </div>
 
-                     <div className="mb-3">
-                        <p className="mb-2 font-medium">
-                            Preço
-                        </p>
-                        <Input
-                            type="text"
-                            register={register}
-                            name="price"
-                            error={errors.price?.message}
-                            placeholder="Ex: 69.000..."
-                        />
+                    <div className="mb-3">
+                        <p className="mb-2 font-medium">Preço</p>
+                        <Input type="text" register={register} name="price" error={errors.price?.message} placeholder="Ex: 69.000..." />
                     </div>
 
-                     <div className="mb-3">
-                        <p className="mb-2 font-medium">
-                            Descrição
-                        </p>
-                        <textarea 
-                            className="rounded-md w-full border-2 h-24 px-2 " 
+                    <div className="mb-3">
+                        <p className="mb-2 font-medium">Descrição</p>
+                        <textarea
+                            className="rounded-md w-full border-2 h-24 px-2"
                             {...register("description")}
                             name="description"
                             id="description"
