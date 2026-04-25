@@ -78,13 +78,15 @@ export function Home() {
                     <Link key={car.id} to={`/car/${car.id}`}>
                         <section  className="w-full bg-white rounded-lg">
                             <div 
-                            className="w-full h-72 rounded-lg bg-slate-200">
+                            className="w-full h-72 rounded-lg bg-slate-200"
+                            style={{ display: loadImages.includes(car.id) ? 'none' : 'block' }}>
                             </div>
                             <img
                                 className="w-full rounded-lg mb-2 max-h-72 hover:scale-105 transition-all"
                                 src={car.images[0]}
                                 alt="Carro"
                                 onLoad={ () => handleImageLoad(car.id)}
+                                style={{ display: loadImages.includes(car.id) ? 'block' : 'none'}}
 
                             />
                             <p className="font-bold mt-1 mb-2 px-2 ">{car.name}</p>
